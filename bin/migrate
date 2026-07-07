@@ -1,0 +1,105 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Migrate module CLI interface
+ *
+ * To get help : migrate --help
+ *
+ * This file is part of the Piko migrate module
+ *
+ * @package Piko\Migrate
+ * @copyright 2026 Sylvain PHILIP.
+ * @license LGPL-3.0; see LICENSE.txt
+ * @link https://github.com/piko-framework/migrate
+ */
+
+use GetOpt\GetOpt;
+use GetOpt\Command;
+use GetOpt\Option;
+use GetOpt\Operand;
+
+// use Devanych\Di\Container;
+use League\Container\Container;
+use League\Container\ReflectionContainer;
+use Dakujem\Migrun\MigrunBuilder;
+
+require $GLOBALS['_composer_autoload_path'] ?? __DIR__ . '/../vendor/autoload.php';
+
+function getPDO(): PDO
+{
+    $username = getenv('DB_USERNAME') ? getenv('DB_USERNAME') : null;
+    $password = getenv('DB_PASSWORD') ? getenv('DB_PASSWORD') : null ;
+    try {
+        $pdo = new PDO(getenv('DSN'), $username, $password);
+        // Test the connection (optional: simple query)
+        $pdo->query('SELECT 1');
+    } catch (PDOException $e) {
+        fwrite(STDERR, "Database connection failed: " . $e->getMessage() . "\n");
+        exit(1);
+    }
+
+    return $pdo;
+}
+
+$workingDir = getcwd();
+
+if (file_exists($workingDir . '/env.php')) {
+    foreach (require $workingDir . '/env.php' as $key => $val) {
+        putenv("{$key}={$val}");
+    }
+}
+
+$getopt = new GetOpt([
+    Option::create('h', 'help')->setDescription('Displays help')
+]);
+
+$getopt->addCommands([
+    Command::create('run', '\Piko\Migrate\Commands\MigrateCommand::run')->setDescription('Run migrations'),
+    Command::create('rollback', '\Piko\Migrate\Commands\MigrateCommand::rollback', [
+        Option::create('s', 'steps', GetOpt::OPTIONAL_ARGUMENT)->setDefaultValue(1)->setDescription('Number of migrations to roll back'),
+    ])->setDescription('Rollback a migration'),
+    Command::create('status', '\Piko\Migrate\Commands\MigrateCommand::status')->setDescription('Run migrations'),
+]);
+
+$pathOption = Option::create('p', 'path', GetOpt::OPTIONAL_ARGUMENT)
+    ->setDescription('path to the migrations directory. Default to cwd/migrations')
+    ->setDefaultValue($workingDir . '/migrations')
+    ->setValidation(
+        fn($val) => file_exists($val),
+        fn(Operand $op, $val) => $op->getName() . ': ' . $val . ' not found or not accessible'
+    );
+
+$getopt->addOption($pathOption);
+
+$getopt->process();
+
+/** @var Command $command */
+$command = $getopt->getCommand();
+
+if ($getopt->getOption('h')) {
+    echo $getopt->getHelpText();
+    exit(0);
+}
+
+if (!$command) {
+    echo "No command given.\n";
+    echo $getopt->getHelpText();
+    exit(0);
+}
+
+list ($class, $method) = explode('::', $command->getHandler());
+$pdo = getPDO();
+$container = new Container();
+$orchestrator = (new MigrunBuilder())
+    ->directory(realpath($getopt->getOption('p')))
+    ->container($container)
+    ->pdoStorage($pdo)
+    ->build();
+
+$container->addShared(\Dakujem\Migrun\Orchestrator::class, $orchestrator);
+$container->addShared(GetOpt::class, $getopt);
+$container->addShared(PDO::class, $pdo);
+$container->delegate(new ReflectionContainer()); // Activate autowiring
+$command = $container->get($class);
+$code = (int) call_user_func([$command, $method]);
+exit($code);
