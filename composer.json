@@ -6,7 +6,7 @@
         "piko",
         "database"
     ],
-    "license": "LGPL-3.0",
+    "license": "MIT",
     "require": {
         "ulrichsg/getopt-php": "^4.0",
         "dakujem/migrun": "^1.0",
