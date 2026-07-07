@@ -116,6 +116,70 @@ final class MigrateCommandTest extends TestCase
         self::assertStringContainsString('Reverted: 2026-07-07-create-users', $output);
     }
 
+    public function testRollbackUsesRetrievedStepsValueWhenGreaterThanOne(): void
+    {
+        $at1 = new DateTimeImmutable('2026-07-07 12:34:56');
+        $at2 = new DateTimeImmutable('2026-07-07 12:35:56');
+        $entry1 = new MigrationHistoryEntry('2026-07-07-create-users', $at1);
+        $entry2 = new MigrationHistoryEntry('2026-07-07-create-posts', $at2);
+
+        $migration1 = new MigrationFile('/tmp/2026-07-07-create-users.php', '2026-07-07-create-users');
+        $migration2 = new MigrationFile('/tmp/2026-07-07-create-posts.php', '2026-07-07-create-posts');
+
+        $storage = $this->createMock(TracksMigrations::class);
+        $finder = $this->createMock(DiscoversMigrations::class);
+        $executor = $this->createMock(ExecutesMigrations::class);
+        $getopt = $this->createMock(GetOpt::class);
+
+        $getopt->expects(self::once())
+            ->method('getOption')
+            ->with('s')
+            ->willReturn(2);
+
+        $storage->expects(self::once())
+            ->method('getApplied')
+            ->willReturn([$entry1, $entry2]);
+
+        $finder->expects(self::once())
+            ->method('find')
+            ->with(self::callback(static function (array $entries): bool {
+                if (2 !== count($entries)) {
+                    return false;
+                }
+
+                $ids = array_map(static fn(MigrationHistoryEntry $entry): string => $entry->id(), $entries);
+                sort($ids);
+
+                return [
+                    '2026-07-07-create-posts',
+                    '2026-07-07-create-users',
+                ] === $ids;
+            }))
+            ->willReturn([
+                '2026-07-07-create-posts' => $migration2,
+                '2026-07-07-create-users' => $migration1,
+            ]);
+
+        $executor->expects(self::exactly(2))
+            ->method('execute');
+
+        $storage->expects(self::exactly(2))
+            ->method('markReverted');
+
+        $command = new MigrateCommand(
+            new Orchestrator($storage, $finder, $executor),
+            $getopt
+        );
+
+        ob_start();
+        $code = $command->rollback();
+        $output = (string) ob_get_clean();
+
+        self::assertSame(0, $code);
+        self::assertStringContainsString('Reverted: 2026-07-07-create-posts', $output);
+        self::assertStringContainsString('Reverted: 2026-07-07-create-users', $output);
+    }
+
     public function testStatusPrintsNoMigrationsWhenEmpty(): void
     {
         $command = new MigrateCommand(

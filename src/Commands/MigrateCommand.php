@@ -26,6 +26,7 @@ use Dakujem\Migrun\Orchestrator;
  */
 class MigrateCommand
 {
+    /** @phpstan-ignore-next-line */
     public function __construct(protected Orchestrator $orchestrator, protected GetOpt $getopt)
     {
     }
@@ -59,7 +60,9 @@ class MigrateCommand
 
     public function rollback(): int
     {
-        $steps = (int) $this->getopt->getOption('s');
+        $stepsOption = $this->getopt->getOption('s');
+        $steps = is_int($stepsOption) ? $stepsOption : 1;
+
         $reverted = $this->orchestrator->rollback($steps);
 
         foreach ($reverted as $migration) {
