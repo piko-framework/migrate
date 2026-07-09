@@ -93,7 +93,7 @@ $container = new Container();
 $orchestrator = (new MigrunBuilder())
     ->directory(realpath($getopt->getOption('p')))
     ->container($container)
-    ->pdoStorage($pdo)
+    ->pdoStorage($pdo, 'migrations')
     ->build();
 
 $container->addShared(\Dakujem\Migrun\Orchestrator::class, $orchestrator);
